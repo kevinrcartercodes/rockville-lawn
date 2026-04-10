@@ -6,7 +6,6 @@ const TARGET_INCHES_WEEK = 1.0;
 const WAIT_IF_RAIN_NEXT_48H = 0.25;
 const SUMMER_DORMANT_START = { month: 6, day: 15 };
 const SUMMER_DORMANT_END   = { month: 9, day: 1 };
-const CLAUDE_MODEL = 'claude-haiku-4-5';
 
 /* ───────── Weather ───────── */
 
@@ -313,80 +312,130 @@ function renderRules() {
   }
 }
 
-/* ───────── Rate My Lawn ───────── */
+/* ───────── Rate My Lawn (the local roast generator) ───────── */
 
-let currentMode = 'kevin';
 let currentImageB64 = null;
-let currentMediaType = null;
 
-function updateKeyStatus() {
-  const key = localStorage.getItem('anthropic_api_key');
-  const dot = document.getElementById('keyDot');
-  const txt = document.getElementById('keyStatusText');
-  const clear = document.getElementById('keyClearBtn');
-  const set = document.getElementById('keySetBtn');
-  if (key) {
-    dot.classList.add('ok');
-    const preview = key.slice(0, 10) + '…' + key.slice(-4);
-    txt.textContent = `Key saved · ${preview}`;
-    clear.hidden = false;
-    set.textContent = 'Change';
-  } else {
-    dot.classList.remove('ok');
-    txt.textContent = 'No API key set';
-    clear.hidden = true;
-    set.textContent = 'Set API key';
+const ROAST = {
+  headlines: [
+    'Not bad. Not Kevin-level. But not bad.',
+    'It\'s a lawn. It\'s there. Kevin\'s is nicer.',
+    'Mid. Respectably mid.',
+    'Decent effort. Kevin would still mow circles around you.',
+    'We\'ve seen worse. Kevin has not.',
+    'Acceptable for your zip code. Unfortunately Kevin lives in it.',
+    'It\'s a green rectangle. Kevin has a green rectangle too. His is greener.',
+    'Nice try. Now go look at Kevin\'s.',
+    'Competent. In the way a participation trophy is competent.',
+    'Grass: confirmed. Vibes: concerning.',
+  ],
+  strengths: [
+    'There is grass. That\'s a start.',
+    'The photo is in focus. Unlike your edging.',
+    'You remembered to water at some point this century.',
+    'No visible deer carcass. Low bar. Cleared.',
+    'The color is somewhere in the green family.',
+    'It\'s mowed. Recently? Debatable. But mowed.',
+    'You clearly own a lawn mower.',
+    'The grass appears to be alive.',
+    'No obvious evidence of a Slip \'N Slide incident.',
+    'Ground cover exceeds 50%. Barely. But exceeds.',
+    'You picked a nice angle. The photo, I mean.',
+    'The fence or border visible in frame is pleasant.',
+  ],
+  issues: [
+    'Blade length inconsistency in the upper-left quadrant. Kevin would never.',
+    'I\'m seeing subtle crabgrass pressure in the shadows. Possibly imagined. Still concerning.',
+    'The edging is giving "weekend warrior" rather than "golf course pro shop."',
+    'Turf density is borderline. I\'ve seen thicker shag carpets.',
+    'A suspicious yellow tinge. Have you been letting the dog out?',
+    'The mowing pattern lacks commitment. Where\'s the stripe game?',
+    'I count at least three different shades of green. Pick one.',
+    'Possible brown patch. Possible shadow. Kevin wouldn\'t have either.',
+    'The grass blade angle suggests you mow when it\'s wet. Shame.',
+    'A dandelion. I can see a dandelion. Or a freckle. Either way: concerning.',
+    'Thatch layer looks… spirited. Almost performative.',
+    'Visible compaction near what I assume is your "path worn by apathy."',
+  ],
+  recommendations: [
+    'Apply Jonathan Green Black Beauty. Like Kevin does. Coincidence? Not a chance.',
+    'Mow at 3.5". Not 3. Not 4. 3.5. Kevin measures with a ruler.',
+    'Water between 5 and 10 AM only. Kevin sets an alarm.',
+    'Core aerate in August. Kevin rents the machine the second it\'s available.',
+    'Apply Dimension (dithiopyr) pre-emergent in late March. Kevin already did.',
+    'Get a soil test. Kevin has three, from different years, laminated.',
+    'Remove all clover. Yes, all of it. Kevin did.',
+    'Overseed in September. With Black Beauty. Like Kevin.',
+    'Stop whatever you\'re doing. Call Kevin.',
+    'Read Kevin\'s Lawn Journal. Study. Weep. Try again.',
+    'Never apply weed & feed in summer. Kevin wouldn\'t, and neither should you.',
+    'Keep clippings on the lawn. Free nitrogen. Kevin knows.',
+  ],
+  kevinWins: [
+    'Kevin\'s lawn has a measured 97% ground cover. Yours has… hopes.',
+    'Kevin mows every 4.2 days on a rolling schedule. You mow when the neighbors complain.',
+    'Kevin\'s soil pH is 6.7. Yours is probably fine? Kevin\'s is 6.7.',
+    'Kevin knows the name of every species of grass in his lawn. You call them "the green ones."',
+    'Kevin\'s edging is so sharp it cleared TSA.',
+    'Kevin\'s Google Maps satellite view has a little shimmer. Yours doesn\'t.',
+    'Kevin has a soil thermometer. You have a thumb.',
+    'Kevin\'s lawn has been peer-reviewed. Twice.',
+    'Kevin\'s HOA sends HIM compliments.',
+    'Kevin\'s Black Beauty germination rate beat the manufacturer\'s own claims.',
+    'Kevin has a dedicated mower for each direction of his stripe pattern.',
+    'Kevin\'s lawn produces its own oxygen now. His words.',
+    'Kevin\'s lawn was spotted by a passing drone and the drone bowed.',
+    'Kevin named each of his 4 fescue cultivars. One is called Steve.',
+  ],
+  partingShots: [
+    'Keep trying. Kevin\'s been doing this for years. You\'ll catch up. Just kidding — you won\'t.',
+    'Your lawn is perfectly fine. For someone who is not Kevin.',
+    'Maybe ask Kevin to borrow a bag of fertilizer. Just don\'t tell him why.',
+    'The good news: you have a lawn. The bad news: Kevin\'s is better.',
+    'Remember: every lawn has a purpose. Yours is to make Kevin\'s look better by comparison.',
+    'We rated this lawn honestly. We rated Kevin\'s honestly too. His was higher.',
+    'Kevin would like you to know he\'s not competitive. He just wins.',
+    'Only one person in Rockville can have the best lawn. It\'s Kevin. Sorry.',
+    'Your lawn has potential. Kevin\'s lawn has a résumé.',
+    'We\'ll put this on the fridge. Under a magnet. Of Kevin\'s lawn.',
+  ]
+};
+
+function pick(arr, n) {
+  const copy = [...arr];
+  const out = [];
+  const count = Math.min(n, copy.length);
+  for (let i = 0; i < count; i++) {
+    const idx = Math.floor(Math.random() * copy.length);
+    out.push(copy.splice(idx, 1)[0]);
   }
+  return out;
 }
 
-function openKeyModal() {
-  const modal = document.getElementById('keyModal');
-  const input = document.getElementById('apiKeyInput');
-  modal.hidden = false;
-  input.value = '';
-  setTimeout(() => input.focus(), 50);
-}
+function rand(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
 
-function closeKeyModal() {
-  document.getElementById('keyModal').hidden = true;
-}
-
-function saveKey() {
-  const input = document.getElementById('apiKeyInput');
-  const key = input.value.trim();
-  if (!key) {
-    input.focus();
-    return;
-  }
-  if (!/^sk-ant-/.test(key)) {
-    alert('That doesn\'t look like an Anthropic API key. It should start with "sk-ant-".');
-    input.focus();
-    return;
-  }
-  localStorage.setItem('anthropic_api_key', key);
-  updateKeyStatus();
-  closeKeyModal();
-  console.log('[lawn] API key saved to localStorage (length: ' + key.length + ')');
-  if (currentImageB64) {
-    submitRate();
-  }
+function generateVerdict() {
+  const score = rand(58, 74);
+  const grade = score >= 72 ? 'C+'
+              : score >= 68 ? 'C'
+              : score >= 64 ? 'C-'
+              : score >= 60 ? 'D+'
+              : 'D';
+  return {
+    score,
+    grade,
+    headline: pick(ROAST.headlines, 1)[0],
+    strengths: pick(ROAST.strengths, 3),
+    issues: pick(ROAST.issues, 4),
+    recommendations: pick(ROAST.recommendations, 4),
+    kevinWins: pick(ROAST.kevinWins, 4),
+    partingShot: pick(ROAST.partingShots, 1)[0]
+  };
 }
 
 function initRateLawn() {
-  updateKeyStatus();
-
-  for (const btn of document.querySelectorAll('.mode-btn')) {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      currentMode = btn.dataset.mode;
-      if (currentImageB64) submitRate();
-    });
-  }
-
   const dz = document.getElementById('dropzone');
   bindFileInput();
-
   dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('dragging'); });
   dz.addEventListener('dragleave', () => dz.classList.remove('dragging'));
   dz.addEventListener('drop', async e => {
@@ -397,23 +446,6 @@ function initRateLawn() {
       await loadImage(file);
       submitRate();
     }
-  });
-
-  document.getElementById('keySetBtn').addEventListener('click', openKeyModal);
-  document.getElementById('keyClearBtn').addEventListener('click', () => {
-    if (confirm('Clear the stored API key?')) {
-      localStorage.removeItem('anthropic_api_key');
-      updateKeyStatus();
-    }
-  });
-  document.getElementById('keyCancel').addEventListener('click', closeKeyModal);
-  document.getElementById('keySave').addEventListener('click', saveKey);
-  document.getElementById('apiKeyInput').addEventListener('keydown', e => {
-    if (e.key === 'Enter') { e.preventDefault(); saveKey(); }
-    if (e.key === 'Escape') closeKeyModal();
-  });
-  document.getElementById('keyModal').addEventListener('click', e => {
-    if (e.target.id === 'keyModal') closeKeyModal();
   });
 }
 
@@ -429,14 +461,13 @@ function bindFileInput() {
 }
 
 async function loadImage(file) {
-  const base64 = await new Promise((resolve, reject) => {
+  const dataUrl = await new Promise((resolve, reject) => {
     const r = new FileReader();
-    r.onload = () => resolve(r.result.split(',')[1]);
+    r.onload = () => resolve(r.result);
     r.onerror = reject;
     r.readAsDataURL(file);
   });
-  currentImageB64 = base64;
-  currentMediaType = file.type;
+  currentImageB64 = dataUrl;
 
   const dz = document.getElementById('dropzone');
   dz.classList.add('has-image');
@@ -444,109 +475,43 @@ async function loadImage(file) {
   const input = el('input', { type: 'file', accept: 'image/*', id: 'lawnPhoto' });
   dz.appendChild(input);
   const img = el('img');
-  img.src = `data:${file.type};base64,${base64}`;
+  img.src = dataUrl;
   dz.appendChild(img);
   bindFileInput();
 }
 
+const LOADING_PHRASES = [
+  'Consulting the turf panel…',
+  'Cross-referencing with Kevin\'s lawn…',
+  'Measuring blade angles…',
+  'Counting the chlorophyll…',
+  'Asking the HOA for comment…',
+  'Warming up the roast oven…',
+  'Checking soil pH. Kevin\'s is 6.7.',
+  'Running photogrammetric density analysis…',
+];
+
 async function submitRate() {
-  if (!currentImageB64) {
-    console.warn('[lawn] submitRate called with no image loaded');
-    return;
-  }
-  const key = localStorage.getItem('anthropic_api_key');
-  if (!key) {
-    console.log('[lawn] no API key, opening modal');
-    openKeyModal();
-    return;
-  }
+  if (!currentImageB64) return;
   const result = document.getElementById('rateResult');
   result.hidden = false;
   result.innerHTML = '';
-  result.appendChild(el('div', { class: 'rate-loading', text: 'Getting the verdict from Claude…' }));
+  const loading = el('div', { class: 'rate-loading', text: pick(LOADING_PHRASES, 1)[0] });
+  result.appendChild(loading);
 
-  console.log(`[lawn] calling Claude (model=${CLAUDE_MODEL}, mode=${currentMode}, image=${Math.round(currentImageB64.length / 1024)}KB)`);
+  // Cycle loading phrases while we "analyze"
+  const phraseInterval = setInterval(() => {
+    loading.textContent = pick(LOADING_PHRASES, 1)[0];
+  }, 700);
 
-  try {
-    const data = await callClaude(currentImageB64, currentMediaType, currentMode, key);
-    console.log('[lawn] got verdict', data);
-    renderRateResult(data, currentMode);
-  } catch (err) {
-    console.error('[lawn] Claude call failed', err);
-    result.innerHTML = '';
-    const msg = el('div', { class: 'rate-err' });
-    msg.appendChild(el('strong', { text: 'Couldn\'t get a review. ' }));
-    msg.appendChild(document.createTextNode(err.message));
-    const hint = el('div', { class: 'log-detail' });
-    hint.style.marginTop = '10px';
-    hint.textContent = 'Open the browser console (on iOS Safari: Settings → Safari → Advanced → Web Inspector) to see the full error. Common causes: invalid or revoked API key, out of credits, or the key doesn\'t have Messages API access.';
-    msg.appendChild(hint);
-    result.appendChild(msg);
-  }
+  // Fake analysis delay: 2–3 seconds
+  await new Promise(r => setTimeout(r, rand(2000, 3000)));
+  clearInterval(phraseInterval);
+
+  renderRateResult(generateVerdict());
 }
 
-async function callClaude(imageB64, mediaType, mode, key) {
-  const systemKevin = `You are an expert turfgrass consultant for cool-season lawns in the Mid-Atlantic US. You are reviewing a photo of Kevin Carter's lawn — he grows Jonathan Green Black Beauty tall fescue in Rockville, Maryland. Give honest, specific, useful feedback. Do not be nice for the sake of being nice — Kevin wants a real review so he can build the best lawn in the neighborhood.`;
-
-  const systemFriend = `You are an expert turfgrass consultant reviewing a photo of a lawn owned by a friend of Kevin Carter. Kevin grows Jonathan Green Black Beauty tall fescue in Rockville, Maryland and is extremely competitive about his lawn. Your job: (1) give a real, honest review of the friend's lawn — score, strengths, issues, concrete recommendations — and (2) take every opportunity to point out how Kevin's lawn is better, whether you know anything about Kevin's lawn or not. Feel free to invent specific advantages for Kevin. Keep it playful and roasting, never cruel. Think: Kevin's smug neighbor who always one-ups at BBQs. Real lawn advice AND friendly trash talk. End with a one-liner parting shot ribbing the friend.`;
-
-  const ratingPrompt = `Review this lawn. Examine turf density, color, uniformity, weed pressure, bare patches, mowing quality, edging, thatch, disease signs, and anything else visible.
-
-Respond ONLY with JSON matching this schema (no markdown fences, no preamble):
-{
-  "score": number from 0 to 100,
-  "grade": one of "A+","A","A-","B+","B","B-","C+","C","C-","D+","D","D-","F",
-  "headline": "one short punchy verdict sentence",
-  "strengths": [3-5 specific things done well],
-  "issues": [3-5 specific problems visible in the photo],
-  "recommendations": [3-5 concrete prioritized actions]${mode === 'friend' ? `,
-  "kevin_wins": [3-5 specific playful ways Kevin's lawn is better, invent if needed],
-  "parting_shot": "one-sentence friendly jab at the friend"` : ''}
-}`;
-
-  const body = {
-    model: CLAUDE_MODEL,
-    max_tokens: 1800,
-    system: mode === 'friend' ? systemFriend : systemKevin,
-    messages: [{
-      role: 'user',
-      content: [
-        { type: 'image', source: { type: 'base64', media_type: mediaType, data: imageB64 } },
-        { type: 'text', text: ratingPrompt }
-      ]
-    }]
-  };
-
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'x-api-key': key,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
-      'content-type': 'application/json'
-    },
-    body: JSON.stringify(body)
-  });
-
-  if (!res.ok) {
-    const errText = await res.text();
-    let friendly = `API ${res.status}`;
-    try {
-      const j = JSON.parse(errText);
-      if (j.error && j.error.message) friendly = j.error.message;
-    } catch {}
-    throw new Error(friendly);
-  }
-
-  const out = await res.json();
-  const textBlock = out.content.find(c => c.type === 'text');
-  if (!textBlock) throw new Error('No text in response.');
-  const match = textBlock.text.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error('Claude did not return JSON.');
-  return JSON.parse(match[0]);
-}
-
-function renderRateResult(data, mode) {
+function renderRateResult(data) {
   const result = document.getElementById('rateResult');
   result.innerHTML = '';
 
@@ -560,17 +525,16 @@ function renderRateResult(data, mode) {
   scoreRow.appendChild(scoreCol);
 
   const metaCol = el('div', { class: 'score-meta' });
-  metaCol.appendChild(el('div', { class: 'score-grade', text: data.grade || '' }));
-  metaCol.appendChild(el('div', { class: 'score-headline', text: data.headline || '' }));
+  metaCol.appendChild(el('div', { class: 'score-grade', text: data.grade }));
+  metaCol.appendChild(el('div', { class: 'score-headline', text: data.headline }));
   scoreRow.appendChild(metaCol);
   result.appendChild(scoreRow);
 
   const addList = (title, listClass, items) => {
-    if (!items || !items.length) return;
     const sec = el('div', { class: 'result-section' });
     sec.appendChild(el('h4', { text: title }));
     const ul = el('ul', { class: 'result-list ' + listClass });
-    for (const it of items) ul.appendChild(el('li', { text: String(it) }));
+    for (const it of items) ul.appendChild(el('li', { text: it }));
     sec.appendChild(ul);
     result.appendChild(sec);
   };
@@ -578,12 +542,14 @@ function renderRateResult(data, mode) {
   addList('✅ What\'s working', '', data.strengths);
   addList('⚠️ What\'s not', 'issues', data.issues);
   addList('→ Do these next', 'recs', data.recommendations);
-  if (mode === 'friend' && data.kevin_wins) {
-    addList('🏆 Where Kevin\'s lawn wins', 'wins', data.kevin_wins);
-  }
-  if (mode === 'friend' && data.parting_shot) {
-    result.appendChild(el('div', { class: 'parting-shot', text: data.parting_shot }));
-  }
+  addList('🏆 Where Kevin\'s lawn wins', 'wins', data.kevinWins);
+
+  result.appendChild(el('div', { class: 'parting-shot', text: data.partingShot }));
+
+  // Scroll the result into view so the user sees it after the fake analysis.
+  setTimeout(() => {
+    result.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, 100);
 }
 
 /* ───────── Main ───────── */

@@ -51,33 +51,20 @@
     <!-- Advisory (soil temp pre-emergent alert etc.) -->
     <section class="advisory" id="advisory" hidden></section>
 
-    <!-- Rate my lawn (Claude vision) -->
+    <!-- Rate my lawn -->
     <section class="rate-section">
-      <div class="section-kicker">📸 RATE MY LAWN</div>
-      <h2 class="section-h">Get a real review.</h2>
-      <p class="section-sub">Upload a photo. Claude scores it, calls out what's working, tells you what to fix.</p>
-
-      <div class="rate-modes" role="tablist" aria-label="Whose lawn is this?">
-        <button class="mode-btn active" data-mode="kevin" type="button">It's me, Kevin</button>
-        <button class="mode-btn" data-mode="friend" type="button">It's a friend's</button>
-      </div>
+      <div class="section-kicker">📸 RATE YOUR LAWN</div>
+      <h2 class="section-h">Think your lawn is good?</h2>
+      <p class="section-sub">Upload a photo. Our expert turf panel will rate it against the local benchmark (Kevin's lawn). Spoiler: it loses.</p>
 
       <label class="dropzone" id="dropzone">
         <input type="file" accept="image/*" id="lawnPhoto" />
         <div class="dropzone-inner">
           <div class="dropzone-icon">📷</div>
-          <div class="dropzone-text">Tap to take a photo or upload</div>
-          <div class="dropzone-hint">Your image is sent directly to Claude. Nothing is saved.</div>
+          <div class="dropzone-text">Tap to upload or take a photo</div>
+          <div class="dropzone-hint">Nothing is uploaded anywhere. Analysis happens right on your device.</div>
         </div>
       </label>
-
-      <div class="rate-toolbar">
-        <div class="key-status"><span class="key-dot" id="keyDot"></span><span id="keyStatusText">No API key set</span></div>
-        <div>
-          <button type="button" id="keySetBtn">Set API key</button>
-          <button type="button" id="keyClearBtn" hidden>Clear</button>
-        </div>
-      </div>
 
       <div class="rate-result" id="rateResult" hidden></div>
     </section>
@@ -140,26 +127,12 @@
         </div>
         <div>
           <div class="ftr-title">Under the hood</div>
-          <p>Weather pulled live from <a href="https://open-meteo.com/">Open-Meteo</a>. Lawn ratings by <a href="https://www.anthropic.com/claude">Claude</a>. No accounts, no tracking, no database.</p>
+          <p>Weather pulled live from <a href="https://open-meteo.com/">Open-Meteo</a>. Lawn ratings conducted by a highly qualified panel. No accounts, no tracking, no database.</p>
         </div>
       </div>
       <div class="ftr-credit">Built for a Rockville tall fescue lawn · Refreshes on every visit</div>
     </div>
   </footer>
-
-  <!-- API key modal -->
-  <div class="modal" id="keyModal" hidden>
-    <div class="modal-card">
-      <h3>Add Claude API key</h3>
-      <p>To rate lawns, we send the photo straight to Claude. Your key stays in your browser's localStorage and goes nowhere else.</p>
-      <input type="password" id="apiKeyInput" placeholder="sk-ant-…" autocomplete="off" />
-      <div class="modal-actions">
-        <button id="keyCancel" type="button">Cancel</button>
-        <button id="keySave" class="primary" type="button">Save</button>
-      </div>
-      <p class="modal-hint">Grab one at <a href="https://console.anthropic.com/" target="_blank" rel="noopener">console.anthropic.com</a></p>
-    </div>
-  </div>
 
   <script>
     // Load data + app scripts with the same cache-bust version.
