@@ -40,9 +40,12 @@
 
     <!-- Hero: today's watering call -->
     <section class="hero" id="hero" data-mood="loading">
-      <div class="hero-kicker" id="heroKicker">TODAY</div>
-      <h1 class="hero-headline" id="heroHeadline"><span class="shimmer">Loading…</span></h1>
-      <p class="hero-sub" id="heroSub">Checking the weather for Rockville.</p>
+      <div class="hero-icon" id="heroIcon">🌱</div>
+      <div class="hero-body">
+        <div class="hero-kicker" id="heroKicker">TODAY</div>
+        <h1 class="hero-headline" id="heroHeadline"><span class="shimmer">Loading…</span></h1>
+        <p class="hero-sub" id="heroSub">Checking the weather for Rockville.</p>
+      </div>
     </section>
 
     <!-- Live stats strip -->
@@ -54,8 +57,7 @@
     <!-- Rate my lawn -->
     <section class="rate-section">
       <div class="section-kicker">📸 RATE YOUR LAWN</div>
-      <h2 class="section-h">Think your lawn is good?</h2>
-      <p class="section-sub">Upload a photo. Our expert turf panel will rate it against the local benchmark (Kevin's lawn). Spoiler: it loses.</p>
+      <h2 class="section-h">Think yours is any good?</h2>
 
       <label class="dropzone" id="dropzone">
         <input type="file" accept="image/*" id="lawnPhoto" />
@@ -69,46 +71,34 @@
       <div class="rate-result" id="rateResult" hidden></div>
     </section>
 
-    <!-- This month -->
-    <section class="month-card">
-      <div class="section-kicker" id="thisMonthKicker">THIS MONTH</div>
-      <h2 class="section-h" id="thisMonthHeadline"></h2>
-      <p class="month-detail" id="thisMonthDetail"></p>
-    </section>
-
     <!-- Next up -->
     <section>
-      <div class="section-kicker">📅 NEXT UP</div>
-      <h2 class="section-h">The next three dates that matter.</h2>
+      <div class="section-kicker">📅 NEXT</div>
       <div class="next-up" id="nextUp"></div>
     </section>
 
     <!-- Log -->
     <section>
-      <div class="section-kicker">📓 LOG</div>
-      <h2 class="section-h">What I've done this year.</h2>
+      <div class="section-kicker">✅ DONE</div>
       <div class="log" id="log"></div>
     </section>
 
     <!-- Year grid -->
     <section>
-      <div class="section-kicker">📆 FULL YEAR</div>
-      <h2 class="section-h">The whole plan.</h2>
+      <div class="section-kicker">📆 YEAR</div>
       <div class="year-grid" id="yearGrid"></div>
     </section>
 
     <!-- Products -->
     <section>
       <div class="section-kicker">🛒 KIT</div>
-      <h2 class="section-h">What goes on the lawn.</h2>
       <div class="product-grid" id="productGrid"></div>
     </section>
 
     <!-- Maryland rules -->
     <section>
-      <div class="section-kicker">⚖️ THE RULES</div>
-      <h2 class="section-h">Maryland fertilizer law.</h2>
-      <ul class="rules-list" id="rulesList"></ul>
+      <div class="section-kicker">⚖️ MD LAW</div>
+      <div class="rules-grid" id="rulesGrid"></div>
     </section>
 
   </main>

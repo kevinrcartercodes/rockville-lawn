@@ -42,6 +42,10 @@ function moodFromColor(color) {
   return { red: 'water', green: 'skip', blue: 'wait', amber: 'dormant', slate: 'dormant' }[color] || 'loading';
 }
 
+function iconForMood(mood) {
+  return { water: '💦', skip: '☀️', wait: '☔', dormant: '😴', loading: '🌱' }[mood] || '🌱';
+}
+
 function computeDecision(w, today) {
   const dates = w.daily.time;
   const rain = w.daily.precipitation_sum;
@@ -99,7 +103,9 @@ function renderDate(today) {
 
 function renderHero(d) {
   const hero = document.getElementById('hero');
-  hero.dataset.mood = moodFromColor(d.color);
+  const mood = moodFromColor(d.color);
+  hero.dataset.mood = mood;
+  document.getElementById('heroIcon').textContent = iconForMood(mood);
   document.getElementById('heroKicker').textContent = d.status;
   document.getElementById('heroHeadline').textContent = d.headline;
   document.getElementById('heroSub').textContent = d.sub;
@@ -160,23 +166,22 @@ function renderAdvisory(items, today) {
   adv.hidden = true;
 }
 
-function renderThisMonth(today) {
-  const item = window.LAWN_SCHEDULE.find(x => x.month === today.month);
-  document.getElementById('thisMonthKicker').textContent = `📅 ${item.name.toUpperCase()}`;
-  document.getElementById('thisMonthHeadline').textContent = item.headline;
-  document.getElementById('thisMonthDetail').textContent = item.detail;
-}
-
 function renderYearGrid(today) {
   const grid = document.getElementById('yearGrid');
   grid.innerHTML = '';
   for (const item of window.LAWN_SCHEDULE) {
-    const box = el('div', { class: 'month-box' });
-    if (item.month === today.month) box.classList.add('current');
-    else if (item.month < today.month) box.classList.add('past');
+    const box = el('div', { class: 'month-box', role: 'button', tabindex: '0' });
+    if (item.month === today.month) {
+      box.classList.add('current', 'expanded');
+    } else if (item.month < today.month) {
+      box.classList.add('past');
+    }
+    box.appendChild(el('div', { class: 'mb-icon', text: item.icon }));
     box.appendChild(el('div', { class: 'mb-name', text: item.name }));
-    box.appendChild(el('div', { class: 'mb-headline', text: item.headline }));
+    box.appendChild(el('div', { class: 'mb-short', text: item.short }));
     box.appendChild(el('div', { class: 'mb-detail', text: item.detail }));
+    box.addEventListener('click', () => box.classList.toggle('expanded'));
+    box.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); box.classList.toggle('expanded'); } });
     grid.appendChild(box);
   }
 }
@@ -212,23 +217,29 @@ function renderNextUp(today) {
   }
   for (const it of enriched) {
     const days = Math.round((it.dateObj - nowDate) / 86400000);
-    const when = days === 0 ? 'today' : days === 1 ? 'tomorrow' : days < 0 ? `${Math.abs(days)} days ago · overdue` : days < 31 ? `in ${days} days` : `in ${Math.round(days/7)} weeks`;
-    const monthAbbr = it.dateObj.toLocaleDateString('en-US', { month: 'short' }).toUpperCase();
-    const dayNum = it.dateObj.getDate();
 
     const item = el('div', { class: 'next-item' });
     if (days < 0) item.classList.add('overdue');
+    if (days === 0) item.classList.add('today');
 
-    const dateCol = el('div', { class: 'next-date' });
-    dateCol.appendChild(el('div', { class: 'next-month', text: monthAbbr }));
-    dateCol.appendChild(el('div', { class: 'next-day', text: String(dayNum) }));
-    item.appendChild(dateCol);
+    item.appendChild(el('div', { class: 'next-icon', text: it.icon || '📅' }));
 
     const body = el('div');
-    body.appendChild(el('div', { class: 'next-when', text: when }));
     body.appendChild(el('div', { class: 'next-label', text: it.label }));
     body.appendChild(el('div', { class: 'next-note', text: it.note }));
     item.appendChild(body);
+
+    const when = el('div', { class: 'next-when' });
+    if (days === 0) {
+      when.appendChild(el('span', { class: 'days-num', text: 'Today' }));
+    } else if (days < 0) {
+      when.appendChild(el('span', { class: 'days-num', text: String(Math.abs(days)) }));
+      when.appendChild(el('span', { class: 'days-unit', text: 'DAYS LATE' }));
+    } else {
+      when.appendChild(el('span', { class: 'days-num', text: String(days) }));
+      when.appendChild(el('span', { class: 'days-unit', text: days === 1 ? 'DAY' : 'DAYS' }));
+    }
+    item.appendChild(when);
 
     ul.appendChild(item);
   }
@@ -244,14 +255,14 @@ function renderLog() {
   }
   for (const l of sorted) {
     const d = new Date(l.date + 'T00:00:00');
-    const dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }).toUpperCase();
+    const dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     const item = el('div', { class: 'log-item' });
-    item.appendChild(el('div', { class: 'log-date', text: dateStr }));
+    item.appendChild(el('div', { class: 'log-icon', text: l.icon || '✓' }));
     const mid = el('div');
     mid.appendChild(el('div', { class: 'log-label', text: l.label }));
     mid.appendChild(el('div', { class: 'log-detail', text: l.detail }));
     item.appendChild(mid);
-    item.appendChild(el('div', { class: 'log-check', text: '✓' }));
+    item.appendChild(el('div', { class: 'log-date', text: dateStr }));
     box.appendChild(item);
   }
 }
@@ -262,24 +273,10 @@ function renderProducts() {
   const hasPreEmergent = log.some(l => l.completes === 'pre-emergent');
 
   const products = [
-    {
-      title: 'Scotts Turf Builder Weed & Feed',
-      note: 'Nitrogen + broadleaf weed control (2,4-D). Kills dandelion and clover. At Walmart in the 2-pack for ~$40.',
-      done: hasScotts
-    },
-    {
-      title: 'Dimension (dithiopyr) pre-emergent',
-      note: 'The only common crabgrass pre-emergent with a short-enough residual (~12 weeks) to allow fall overseeding. Apply by mid-April. At Lowe\'s or Home Depot (Hi-Yield Turf & Ornamental Weed and Grass Stopper).',
-      done: hasPreEmergent
-    },
-    {
-      title: 'Jonathan Green Veri-Green Starter 12-18-8',
-      note: 'Buy in August. Apply at overseeding in September. The 18% phosphate is legal under Maryland\'s new-lawn exemption. Not "Love Your Lawn – Love Your Soil" — that\'s a soil conditioner, not a starter.'
-    },
-    {
-      title: 'Jonathan Green Black Beauty Original',
-      note: '100% tall fescue blend formulated for the Mid-Atlantic. Overseed September 1 – October 1 for best germination.'
-    }
+    { icon: '💊', title: 'Weed & Feed',      sub: hasScotts ? 'Applied Apr 2' : 'Scotts Turf Builder', done: hasScotts },
+    { icon: '🎯', title: 'Pre-emergent',     sub: hasPreEmergent ? 'Applied' : 'Dimension · by mid-Apr',  done: hasPreEmergent },
+    { icon: '🌱', title: 'Starter fert',     sub: 'Veri-Green 12-18-8 · Sep' },
+    { icon: '🌿', title: 'Black Beauty seed', sub: 'Overseed Sep 1 – Oct 1' }
   ];
 
   const grid = document.getElementById('productGrid');
@@ -287,28 +284,32 @@ function renderProducts() {
   for (const p of products) {
     const card = el('div', { class: 'product' });
     if (p.done) card.classList.add('done');
+    card.appendChild(el('div', { class: 'product-icon', text: p.icon }));
     card.appendChild(el('h3', { text: p.title }));
-    card.appendChild(el('p', { text: p.note }));
+    card.appendChild(el('div', { class: 'product-sub', text: p.sub }));
     grid.appendChild(card);
   }
 }
 
 function renderRules() {
   const rules = [
-    { title: 'Blackout', body: 'No lawn fertilizer applications Nov 16 – Mar 1. Last legal day is November 15.' },
-    { title: 'Per-application cap', body: '≤ 0.9 lb total nitrogen per 1,000 sq ft, of which no more than 0.7 lb may be water-soluble.' },
-    { title: 'Annual cap', body: 'Enhanced-efficiency products are capped at 2.5 lb N per 1,000 sq ft per year, with no more than 0.7 lb released in any given month.' },
-    { title: 'Slow-release minimum', body: 'All turf fertilizer sold in Maryland must contain at least 20% slow-release nitrogen.' },
-    { title: 'Phosphorus', body: 'Banned on established lawns unless a soil test shows deficiency. Permitted at establishment, patching, or renovation (starter fertilizer).' },
-    { title: 'Setbacks', body: '15 ft from any waterway (10 ft with a drop spreader or rotary spreader with a deflector shield). Sweep fertilizer off sidewalks and driveways. No application if heavy rain is forecast or the ground is frozen or saturated.' }
+    { icon: '🚫', title: 'Blackout',    body: 'No fertilizer Nov 16 – Mar 1. Last legal day is Nov 15.' },
+    { icon: '⚖️', title: 'N cap',       body: '≤ 0.9 lb total N / 1,000 sq ft per application, ≤ 0.7 lb soluble.' },
+    { icon: '📊', title: 'Yearly',      body: '≤ 2.5 lb N / 1,000 sq ft/year for enhanced-efficiency products.' },
+    { icon: '🐢', title: 'Slow release', body: 'All MD turf fertilizer must be ≥ 20% slow-release nitrogen.' },
+    { icon: '🅿️', title: 'No P',        body: 'Phosphorus banned on established lawns. Allowed at seeding/renovation.' },
+    { icon: '🌊', title: 'Setbacks',    body: '15 ft from waterways (10 ft with drop/deflector spreader). No app if rain forecast or ground frozen/saturated.' }
   ];
-  const ul = document.getElementById('rulesList');
-  ul.innerHTML = '';
+  const grid = document.getElementById('rulesGrid');
+  grid.innerHTML = '';
   for (const r of rules) {
-    const li = el('li');
-    li.appendChild(el('strong', { text: r.title + '. ' }));
-    li.appendChild(document.createTextNode(r.body));
-    ul.appendChild(li);
+    const card = el('div', { class: 'rule', role: 'button', tabindex: '0' });
+    card.appendChild(el('div', { class: 'rule-icon', text: r.icon }));
+    card.appendChild(el('div', { class: 'rule-title', text: r.title }));
+    card.appendChild(el('div', { class: 'rule-detail', text: r.body }));
+    card.addEventListener('click', () => card.classList.toggle('expanded'));
+    card.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); card.classList.toggle('expanded'); } });
+    grid.appendChild(card);
   }
 }
 
@@ -557,7 +558,6 @@ function renderRateResult(data) {
 async function main() {
   const today = todayInRockville();
   renderDate(today);
-  renderThisMonth(today);
   renderYearGrid(today);
   renderLog();
   renderProducts();
