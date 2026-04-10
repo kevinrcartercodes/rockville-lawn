@@ -2,114 +2,172 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Rockville Lawn — Tall Fescue Care</title>
-<link rel="stylesheet" href="styles.css" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<meta name="theme-color" content="#fdfbf5" />
+<title>Kevin's Lawn Journal · Rockville MD</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="preconnect" href="https://api.open-meteo.com" />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,400;1,9..144,500;1,9..144,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8C%B1%3C/text%3E%3C/svg%3E" />
+<script>
+  // Cache bust CSS/JS on every visit — no hard refresh needed.
+  (function () {
+    var v = Date.now();
+    window.__CACHE_V = v;
+    var l = document.createElement('link');
+    l.rel = 'stylesheet';
+    l.href = 'styles.css?v=' + v;
+    document.head.appendChild(l);
+  })();
+</script>
 </head>
 <body>
-  <header class="site-header">
+  <header class="hdr">
     <div class="wrap">
-      <h1>Rockville Lawn</h1>
-      <p class="sub">Jonathan Green Black Beauty tall fescue · Montgomery County, MD</p>
+      <div class="brand">
+        <div class="brand-mark">KLJ</div>
+        <div>
+          <div class="brand-title">Kevin's Lawn Journal</div>
+          <div class="brand-loc">Rockville, MD · Tall Fescue</div>
+        </div>
+      </div>
+      <div class="today-date" id="todayDate"></div>
     </div>
   </header>
 
   <main class="wrap">
 
-    <!-- Watering recommendation card -->
-    <section id="waterCard" class="card watering loading" aria-live="polite">
-      <div class="card-head">
-        <span class="kicker">Today's watering call</span>
-        <span class="updated" id="updated">loading…</span>
+    <!-- Hero: today's watering call -->
+    <section class="hero" id="hero" data-mood="loading">
+      <div class="hero-kicker" id="heroKicker">TODAY</div>
+      <h1 class="hero-headline" id="heroHeadline"><span class="shimmer">Loading…</span></h1>
+      <p class="hero-sub" id="heroSub">Checking the weather for Rockville.</p>
+    </section>
+
+    <!-- Live stats strip -->
+    <section class="stats" id="stats"></section>
+
+    <!-- Advisory (soil temp pre-emergent alert etc.) -->
+    <section class="advisory" id="advisory" hidden></section>
+
+    <!-- Rate my lawn (Claude vision) -->
+    <section class="rate-section">
+      <div class="section-kicker">📸 RATE MY LAWN</div>
+      <h2 class="section-h">Get a real review.</h2>
+      <p class="section-sub">Upload a photo. Claude scores it, calls out what's working, tells you what to fix.</p>
+
+      <div class="rate-modes" role="tablist" aria-label="Whose lawn is this?">
+        <button class="mode-btn active" data-mode="kevin" type="button">It's me, Kevin</button>
+        <button class="mode-btn" data-mode="friend" type="button">It's a friend's</button>
       </div>
-      <div class="verdict">
-        <div class="status" id="waterStatus">—</div>
-        <p class="explain" id="waterExplain">Fetching weather data…</p>
-      </div>
-      <div class="weather-grid" id="weatherGrid"></div>
+
+      <label class="dropzone" id="dropzone">
+        <input type="file" accept="image/*" id="lawnPhoto" />
+        <div class="dropzone-inner">
+          <div class="dropzone-icon">📷</div>
+          <div class="dropzone-text">Tap to take a photo or upload</div>
+          <div class="dropzone-hint">Your image is sent directly to Claude. Nothing is saved.</div>
+        </div>
+      </label>
+
+      <div class="rate-result" id="rateResult" hidden></div>
+    </section>
+
+    <!-- This month -->
+    <section class="month-card">
+      <div class="section-kicker" id="thisMonthKicker">THIS MONTH</div>
+      <h2 class="section-h" id="thisMonthHeadline"></h2>
+      <p class="month-detail" id="thisMonthDetail"></p>
     </section>
 
     <!-- Next up -->
-    <section class="card">
-      <h2>Next up</h2>
-      <ul id="nextUp" class="next-up"><li class="muted">Loading…</li></ul>
+    <section>
+      <div class="section-kicker">📅 NEXT UP</div>
+      <h2 class="section-h">The next three dates that matter.</h2>
+      <div class="next-up" id="nextUp"></div>
     </section>
 
-    <!-- Seasonal headline -->
-    <section class="card">
-      <h2>This month</h2>
-      <div id="thisMonth" class="this-month"></div>
+    <!-- Log -->
+    <section>
+      <div class="section-kicker">📓 LOG</div>
+      <h2 class="section-h">What I've done this year.</h2>
+      <div class="log" id="log"></div>
     </section>
 
-    <!-- Monthly schedule -->
-    <section class="card">
-      <h2>Yearly schedule</h2>
-      <div class="schedule-grid" id="scheduleGrid"></div>
+    <!-- Year grid -->
+    <section>
+      <div class="section-kicker">📆 FULL YEAR</div>
+      <h2 class="section-h">The whole plan.</h2>
+      <div class="year-grid" id="yearGrid"></div>
     </section>
 
     <!-- Products -->
-    <section class="card">
-      <h2>Products I use</h2>
-      <div class="product-grid">
-        <div class="product">
-          <h3>Pre-emergent (late March / early April)</h3>
-          <p><strong>Dimension (dithiopyr)</strong> — the only common pre-emergent with a short-enough residual (~12 weeks) to allow fall overseeding. Prodiamine (Barricade) blocks September germination for 4–6 months and is off the table.</p>
-        </div>
-        <div class="product">
-          <h3>Starter fertilizer (September, at seeding)</h3>
-          <p><strong>Jonathan Green Veri-Green Starter 12-18-8</strong> — the 18% phosphate is legal at seeding/renovation under Maryland's new-lawn exemption. <em>Do not</em> use "Love Your Lawn – Love Your Soil" as a starter; it's a gypsum soil conditioner, not a starter fertilizer.</p>
-        </div>
-        <div class="product">
-          <h3>Maintenance fertilizer (Oct + second Nov app)</h3>
-          <p>Any MD-legal turf fertilizer with ≥20% slow-release N and <strong>no phosphorus</strong>. Apply at 0.9 lb N / 1,000 sq ft (no more than 0.7 lb of it soluble). Scotts Turf Builder and Jonathan Green Green-Up both qualify.</p>
-        </div>
-        <div class="product">
-          <h3>Seed</h3>
-          <p><strong>Jonathan Green Black Beauty Original</strong> or <strong>Black Beauty Delmarva</strong> — both 100% tall fescue blends formulated for the Mid-Atlantic. Overseed Sept 1 – Oct 1 for best results.</p>
-        </div>
-      </div>
+    <section>
+      <div class="section-kicker">🛒 KIT</div>
+      <h2 class="section-h">What goes on the lawn.</h2>
+      <div class="product-grid" id="productGrid"></div>
     </section>
 
-    <!-- Maryland law -->
-    <section class="card">
-      <h2>Maryland law (don't get fined)</h2>
-      <ul class="law">
-        <li><strong>Blackout:</strong> no lawn fertilizer application Nov 16 – Mar 1. Last legal day is Nov 15.</li>
-        <li><strong>Per-application cap:</strong> ≤ 0.9 lb total nitrogen / 1,000 sq ft, of which ≤ 0.7 lb may be water-soluble.</li>
-        <li><strong>Annual cap:</strong> follow UMD's rate table. Enhanced-efficiency products: up to 2.5 lb N/1,000 sq ft/year, with ≤ 0.7 lb released in any month.</li>
-        <li><strong>Slow-release:</strong> all turf fertilizer sold in MD must contain ≥ 20% slow-release nitrogen.</li>
-        <li><strong>Phosphorus:</strong> prohibited on established lawns unless a soil test shows deficiency. Permitted at establishment, patching, or renovation (starter fertilizer).</li>
-        <li><strong>Setbacks:</strong> 15 ft from any waterway (10 ft with a drop spreader or rotary spreader with deflector shield). Sweep fertilizer off impervious surfaces. No application when heavy rain is forecast, or when ground is frozen or saturated.</li>
-      </ul>
-    </section>
-
-    <!-- Sources -->
-    <section class="card sources">
-      <h2>Sources</h2>
-      <ul>
-        <li><a href="https://mda.maryland.gov/pages/fertilizer.aspx">Maryland Department of Agriculture — Lawn Fertilizer Law</a></li>
-        <li><a href="https://extension.umd.edu/resource/lawn-maintenance-calendar-maryland-tall-fescue-home-lawns">UMD Extension — Lawn Maintenance Calendar for Tall Fescue</a></li>
-        <li><a href="https://extension.umd.edu/resource/lawn-fertilizer-schedule-table">UMD Extension — Lawn Fertilizer Schedule Table</a></li>
-        <li><a href="https://extension.umd.edu/resource/fertilizing-home-lawns">UMD Extension — Fertilizing Home Lawns</a></li>
-        <li><a href="https://extension.umd.edu/resource/crabgrass">UMD Extension — Crabgrass</a></li>
-        <li><a href="https://extension.umd.edu/resource/lawn-renovation-and-overseeding">UMD Extension — Lawn Renovation and Overseeding</a></li>
-        <li><a href="https://extension.umd.edu/resource/watering-lawns">UMD Extension — Watering Lawns</a></li>
-        <li><a href="https://www.jonathangreen.com/product/black-beauty-original-grass-seed/">Jonathan Green Black Beauty Original</a></li>
-        <li><a href="https://www.jonathangreen.com/product/veri-green-starter-fertilizer-for-seeding-sodding/">Jonathan Green Veri-Green Starter 12-18-8</a></li>
-        <li>Weather data: <a href="https://open-meteo.com/">Open-Meteo</a> (CC BY 4.0)</li>
-      </ul>
+    <!-- Maryland rules -->
+    <section>
+      <div class="section-kicker">⚖️ THE RULES</div>
+      <h2 class="section-h">Maryland fertilizer law.</h2>
+      <ul class="rules-list" id="rulesList"></ul>
     </section>
 
   </main>
 
-  <footer>
+  <footer class="ftr">
     <div class="wrap">
-      <p>Built for a Rockville, MD tall fescue lawn. Weather pulled live from Open-Meteo. No accounts, no tracking.</p>
+      <div class="ftr-grid">
+        <div>
+          <div class="ftr-title">Sources</div>
+          <ul>
+            <li><a href="https://mda.maryland.gov/pages/fertilizer.aspx">MDA — Lawn Fertilizer Law</a></li>
+            <li><a href="https://extension.umd.edu/resource/lawn-maintenance-calendar-maryland-tall-fescue-home-lawns">UMD Ext. — Tall Fescue Calendar</a></li>
+            <li><a href="https://extension.umd.edu/resource/crabgrass">UMD Ext. — Crabgrass</a></li>
+            <li><a href="https://www.jonathangreen.com/product/black-beauty-original-grass-seed/">Jonathan Green Black Beauty</a></li>
+          </ul>
+        </div>
+        <div>
+          <div class="ftr-title">Under the hood</div>
+          <p>Weather pulled live from <a href="https://open-meteo.com/">Open-Meteo</a>. Lawn ratings by <a href="https://www.anthropic.com/claude">Claude</a>. No accounts, no tracking, no database.</p>
+        </div>
+      </div>
+      <div class="ftr-credit">Built for a Rockville tall fescue lawn · Refreshes on every visit</div>
     </div>
   </footer>
 
-  <script src="schedule.js"></script>
-  <script src="app.js"></script>
+  <!-- API key modal -->
+  <div class="modal" id="keyModal" hidden>
+    <div class="modal-card">
+      <h3>Add Claude API key</h3>
+      <p>To rate lawns, we send the photo straight to Claude. Your key stays in your browser's localStorage and goes nowhere else.</p>
+      <input type="password" id="apiKeyInput" placeholder="sk-ant-…" autocomplete="off" />
+      <div class="modal-actions">
+        <button id="keyCancel" type="button">Cancel</button>
+        <button id="keySave" class="primary" type="button">Save</button>
+      </div>
+      <p class="modal-hint">Grab one at <a href="https://console.anthropic.com/" target="_blank" rel="noopener">console.anthropic.com</a></p>
+    </div>
+  </div>
+
+  <script>
+    // Load data + app scripts with the same cache-bust version.
+    (function () {
+      var v = window.__CACHE_V;
+      function load(src) {
+        return new Promise(function (resolve, reject) {
+          var s = document.createElement('script');
+          s.src = src + '?v=' + v;
+          s.onload = resolve;
+          s.onerror = reject;
+          document.body.appendChild(s);
+        });
+      }
+      load('schedule.js').then(function () { return load('app.js'); });
+    })();
+  </script>
 </body>
 </html>

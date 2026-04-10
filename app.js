@@ -1,266 +1,540 @@
-// Rockville Lawn — live watering recommendation engine.
-// Weather: Open-Meteo (no API key). Location: Rockville, MD.
+// Kevin's Lawn Journal — weather engine + Rate My Lawn (Claude vision)
+// Weather: Open-Meteo (no key). Rating: Anthropic Claude via direct-browser-access.
 
 const ROCKVILLE = { lat: 39.0840, lon: -77.1528, tz: 'America/New_York' };
-
-// Watering thresholds — derived from UMD Extension "Watering Lawns" guidance.
 const TARGET_INCHES_WEEK = 1.0;
 const WAIT_IF_RAIN_NEXT_48H = 0.25;
 const SUMMER_DORMANT_START = { month: 6, day: 15 };
 const SUMMER_DORMANT_END   = { month: 9, day: 1 };
+const CLAUDE_MODEL = 'claude-sonnet-4-5';
+
+/* ───────── Weather ───────── */
 
 async function fetchWeather() {
   const url = new URL('https://api.open-meteo.com/v1/forecast');
   url.search = new URLSearchParams({
     latitude: ROCKVILLE.lat,
     longitude: ROCKVILLE.lon,
-    current: 'temperature_2m,precipitation,weather_code',
+    current: 'temperature_2m,precipitation',
     daily: 'temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max',
     hourly: 'soil_temperature_6cm',
     past_days: 7,
     forecast_days: 3,
     timezone: ROCKVILLE.tz,
     temperature_unit: 'fahrenheit',
-    precipitation_unit: 'inch',
-    wind_speed_unit: 'mph'
+    precipitation_unit: 'inch'
   });
-  const resp = await fetch(url);
-  if (!resp.ok) throw new Error(`Weather fetch failed: ${resp.status}`);
-  return resp.json();
+  const r = await fetch(url, { cache: 'no-store' });
+  if (!r.ok) throw new Error(`Weather ${r.status}`);
+  return r.json();
 }
 
 function todayInRockville() {
-  const fmt = new Intl.DateTimeFormat('en-CA', {
-    timeZone: ROCKVILLE.tz,
-    year: 'numeric', month: '2-digit', day: '2-digit'
-  });
-  const parts = fmt.formatToParts(new Date()).reduce((acc, p) => (acc[p.type] = p.value, acc), {});
-  return {
-    iso: `${parts.year}-${parts.month}-${parts.day}`,
-    month: parseInt(parts.month, 10),
-    day: parseInt(parts.day, 10),
-    year: parseInt(parts.year, 10)
-  };
+  const fmt = new Intl.DateTimeFormat('en-CA', { timeZone: ROCKVILLE.tz, year: 'numeric', month: '2-digit', day: '2-digit' });
+  const p = fmt.formatToParts(new Date()).reduce((a, x) => (a[x.type] = x.value, a), {});
+  return { iso: `${p.year}-${p.month}-${p.day}`, month: +p.month, day: +p.day, year: +p.year };
 }
 
-function isInSummerDormancy(today) {
-  const asNum = (m, d) => m * 100 + d;
-  const now = asNum(today.month, today.day);
-  const start = asNum(SUMMER_DORMANT_START.month, SUMMER_DORMANT_START.day);
-  const end = asNum(SUMMER_DORMANT_END.month, SUMMER_DORMANT_END.day);
-  return now >= start && now < end;
+const asOrd = (m, d) => m * 100 + d;
+const inSummerDormancy = t => asOrd(t.month, t.day) >= asOrd(SUMMER_DORMANT_START.month, SUMMER_DORMANT_START.day) && asOrd(t.month, t.day) < asOrd(SUMMER_DORMANT_END.month, SUMMER_DORMANT_END.day);
+const inFertilizerBlackout = t => asOrd(t.month, t.day) >= asOrd(11, 16) || asOrd(t.month, t.day) <= asOrd(3, 1);
+
+function moodFromColor(color) {
+  return { red: 'water', green: 'skip', blue: 'wait', amber: 'dormant', slate: 'dormant' }[color] || 'loading';
 }
 
-function isInFertilizerBlackout(today) {
-  const asNum = (m, d) => m * 100 + d;
-  const now = asNum(today.month, today.day);
-  // Nov 16 – Mar 1 (inclusive of Nov 16, through Mar 1)
-  return now >= asNum(11, 16) || now <= asNum(3, 1);
-}
+function computeDecision(w, today) {
+  const dates = w.daily.time;
+  const rain = w.daily.precipitation_sum;
+  const probs = w.daily.precipitation_probability_max;
+  let todayIdx = dates.indexOf(today.iso);
+  if (todayIdx === -1) todayIdx = 7;
 
-function computeWateringDecision(weather, today) {
-  const dailyDates = weather.daily.time;
-  const dailyRain = weather.daily.precipitation_sum;
-  const todayIdx = dailyDates.indexOf(today.iso);
+  const start = Math.max(0, todayIdx - 6);
+  const rainfall7d = rain.slice(start, todayIdx + 1).reduce((a, b) => a + (b || 0), 0);
+  const rainfallNext48 = rain.slice(todayIdx, todayIdx + 2).reduce((a, b) => a + (b || 0), 0);
+  const probNext48 = Math.max(0, ...probs.slice(todayIdx, todayIdx + 2).map(x => x || 0));
 
-  // Rolling 7 days ending today (inclusive).
-  const start = Math.max(0, (todayIdx === -1 ? dailyDates.length - 3 : todayIdx) - 6);
-  const end = (todayIdx === -1 ? dailyDates.length - 3 : todayIdx) + 1;
-  const last7 = dailyRain.slice(start, end);
-  const rainfall7d = last7.reduce((a, b) => a + (b || 0), 0);
+  const base = { rainfall7d, rainfallNext48, probNext48 };
 
-  // Next 48 hours = remaining portion of today + next 2 days (use today + next 2 entries as approximation).
-  const next48start = (todayIdx === -1 ? dailyDates.length - 3 : todayIdx);
-  const next48 = dailyRain.slice(next48start, next48start + 2);
-  const rainfallNext48 = next48.reduce((a, b) => a + (b || 0), 0);
-
-  // Max rain probability in next 48h
-  const probNext48 = Math.max(...weather.daily.precipitation_probability_max.slice(next48start, next48start + 2).map(x => x || 0));
-
-  if (isInFertilizerBlackout(today) && (today.month === 12 || today.month === 1 || today.month === 2)) {
-    return {
-      status: 'DORMANT',
-      headline: 'Lawn is dormant — no watering needed',
-      explain: `Tall fescue is winter-dormant. Nothing to water, nothing to fertilize (MD blackout in effect until March 1).`,
-      color: 'slate',
-      rainfall7d, rainfallNext48, probNext48
-    };
+  if (inFertilizerBlackout(today) && (today.month >= 12 || today.month <= 2)) {
+    return { ...base, color: 'slate', status: 'DORMANT', headline: 'Nothing to do.', sub: 'Lawn is winter-dormant. MD fertilizer blackout is in effect until March 1.' };
   }
-
-  if (isInSummerDormancy(today)) {
+  if (inSummerDormancy(today)) {
     if (rainfall7d < 0.25) {
-      return {
-        status: 'DORMANT (DEEP RESCUE OK)',
-        headline: 'Summer dormancy — deep rescue watering is optional',
-        explain: `UMD's default stance is to let tall fescue go dormant June–August. Past 7 days got only ${rainfall7d.toFixed(2)}". If the lawn has been brown for 4+ weeks, a single deep 0.5" soak will keep crowns alive. Otherwise, leave it alone.`,
-        color: 'amber',
-        rainfall7d, rainfallNext48, probNext48
-      };
+      return { ...base, color: 'amber', status: 'DORMANT · RESCUE OK', headline: 'Let it sleep.', sub: `Only ${rainfall7d.toFixed(2)}" in the last week. If it's been brown 4+ weeks, one deep 0.5" soak keeps the crowns alive. Otherwise leave it alone.` };
     }
-    return {
-      status: 'DORMANT — DO NOT WATER',
-      headline: 'Summer dormancy — skip it',
-      explain: `UMD says let cool-season grass go dormant in summer. Past 7 days: ${rainfall7d.toFixed(2)}" — plenty to keep crowns alive. Save the water bill.`,
-      color: 'amber',
-      rainfall7d, rainfallNext48, probNext48
-    };
+    return { ...base, color: 'amber', status: 'SUMMER DORMANT', headline: 'Let it sleep.', sub: `UMD says let cool-season grass go dormant in summer. Past 7 days brought ${rainfall7d.toFixed(2)}" — plenty for the crowns.` };
   }
-
   if (rainfall7d >= TARGET_INCHES_WEEK) {
-    return {
-      status: 'SKIP',
-      headline: 'Rain covered it — no watering needed',
-      explain: `The last 7 days brought ${rainfall7d.toFixed(2)}" of rain — above the 1.0" weekly target for tall fescue. Don't water today.`,
-      color: 'green',
-      rainfall7d, rainfallNext48, probNext48
-    };
+    return { ...base, color: 'green', status: 'SKIP', headline: 'No watering today.', sub: `The last 7 days brought ${rainfall7d.toFixed(2)}" — above the 1" weekly target. Rain handled it.` };
   }
-
   if (rainfallNext48 >= WAIT_IF_RAIN_NEXT_48H || probNext48 >= 70) {
-    return {
-      status: 'WAIT',
-      headline: 'Rain incoming — hold off',
-      explain: `Forecast shows ${rainfallNext48.toFixed(2)}" of rain in the next 48 hours (max probability ${probNext48}%). Wait for it, then reassess.`,
-      color: 'blue',
-      rainfall7d, rainfallNext48, probNext48
-    };
+    return { ...base, color: 'blue', status: 'WAIT', headline: 'Wait it out.', sub: `${rainfallNext48.toFixed(2)}" of rain forecast in the next 48 hours (max probability ${probNext48}%). Let the sky water the lawn.` };
   }
-
   const deficit = Math.max(0, TARGET_INCHES_WEEK - rainfall7d);
-  return {
-    status: 'WATER',
-    headline: `Water about ${deficit.toFixed(1)}" deeply, between 5 and 10 AM`,
-    explain: `Only ${rainfall7d.toFixed(2)}" of rain in the last 7 days — you're short by ${deficit.toFixed(2)}". Water deeply and infrequently (one ${deficit.toFixed(1)}" soak is better than 4 shallow ones). Morning watering avoids brown patch disease.`,
-    color: 'red',
-    rainfall7d, rainfallNext48, probNext48
-  };
+  return { ...base, color: 'red', status: 'WATER', headline: 'Water today.', sub: `Only ${rainfall7d.toFixed(2)}" of rain in the last 7 days — short by ${deficit.toFixed(2)}". Put down about ${deficit.toFixed(1)}" deep between 5 and 10 AM. One long soak, not four short ones.`, deficit };
 }
 
-function renderWaterCard(decision, weather, today) {
-  const card = document.getElementById('waterCard');
-  card.classList.remove('loading');
-  card.dataset.color = decision.color;
+/* ───────── Render ───────── */
 
-  document.getElementById('waterStatus').textContent = decision.status;
-  document.getElementById('waterExplain').textContent = decision.explain;
-  document.getElementById('updated').textContent = `updated ${new Date().toLocaleString('en-US', { timeZone: ROCKVILLE.tz, hour: 'numeric', minute: '2-digit' })}`;
+function el(tag, attrs = {}, ...children) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === 'class') e.className = v;
+    else if (k === 'text') e.textContent = v;
+    else e.setAttribute(k, v);
+  }
+  for (const c of children) {
+    if (c == null) continue;
+    e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+  }
+  return e;
+}
 
-  // Weather grid
-  const todayTemp = Math.round(weather.current.temperature_2m);
-  const grid = document.getElementById('weatherGrid');
-  grid.innerHTML = '';
+function renderDate(today) {
+  const d = new Date(today.year, today.month - 1, today.day);
+  document.getElementById('todayDate').textContent =
+    d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }).toUpperCase();
+}
 
-  const cells = [
-    { label: 'Now', value: `${todayTemp}°F` },
-    { label: 'Rain, last 7 days', value: `${decision.rainfall7d.toFixed(2)}"` },
-    { label: 'Rain, next 48 hr', value: `${decision.rainfallNext48.toFixed(2)}"` },
-    { label: 'Rain probability', value: `${decision.probNext48}%` },
+function renderHero(d) {
+  const hero = document.getElementById('hero');
+  hero.dataset.mood = moodFromColor(d.color);
+  document.getElementById('heroKicker').textContent = d.status;
+  document.getElementById('heroHeadline').textContent = d.headline;
+  document.getElementById('heroSub').textContent = d.sub;
+}
+
+function renderStats(w, d, today) {
+  const stats = document.getElementById('stats');
+  stats.innerHTML = '';
+  const items = [
+    { label: 'Now',        value: Math.round(w.current.temperature_2m), unit: '°F' },
+    { label: 'Rain · 7d',  value: d.rainfall7d.toFixed(2),              unit: '″' },
+    { label: 'Rain · 48h', value: d.rainfallNext48.toFixed(2),          unit: '″' },
+    { label: 'Rain prob',  value: d.probNext48,                         unit: '%' },
   ];
 
-  // Pre-emergent advisory (March only) — soil temp at 6cm (~2.4")
-  if (today.month === 3 && weather.hourly && weather.hourly.soil_temperature_6cm) {
-    const soilTemps = weather.hourly.soil_temperature_6cm.filter(x => x !== null);
-    if (soilTemps.length > 0) {
-      const recent = soilTemps.slice(-120); // last ~5 days of hourly readings
-      const avg = recent.reduce((a, b) => a + b, 0) / recent.length;
-      cells.push({ label: 'Soil temp (2")', value: `${avg.toFixed(0)}°F` });
-      if (avg >= 53) {
-        const advisory = document.createElement('div');
-        advisory.className = 'advisory';
-        advisory.textContent = `Soil temp is at ${avg.toFixed(0)}°F — apply dithiopyr (Dimension) pre-emergent NOW if you haven't already. Crabgrass germinates at sustained 55°F.`;
-        card.appendChild(advisory);
+  // Replace "Rain prob" with soil temp during pre-emergent window (Mar–Apr).
+  if ((today.month === 3 || today.month === 4) && w.hourly && w.hourly.soil_temperature_6cm && w.hourly.time) {
+    const soilTemps = w.hourly.soil_temperature_6cm;
+    const times = w.hourly.time;
+    const todayStart = times.findIndex(t => t.startsWith(today.iso));
+    if (todayStart > 0) {
+      const sliceStart = Math.max(0, todayStart - 120);
+      const past5d = soilTemps.slice(sliceStart, todayStart).filter(x => x !== null);
+      if (past5d.length) {
+        const avg = past5d.reduce((a, b) => a + b, 0) / past5d.length;
+        items[3] = { label: 'Soil · 2″', value: Math.round(avg), unit: '°F', soilTemp: avg };
       }
     }
   }
 
-  for (const c of cells) {
-    const el = document.createElement('div');
-    el.className = 'cell';
-    el.innerHTML = `<div class="cell-label">${c.label}</div><div class="cell-value">${c.value}</div>`;
-    grid.appendChild(el);
+  for (const it of items) {
+    const cell = el('div', { class: 'stat' });
+    cell.appendChild(el('div', { class: 'stat-label', text: it.label }));
+    const val = el('div', { class: 'stat-value' });
+    val.appendChild(document.createTextNode(String(it.value)));
+    val.appendChild(el('span', { class: 'unit', text: it.unit }));
+    cell.appendChild(val);
+    stats.appendChild(cell);
   }
+  return items;
+}
+
+function renderAdvisory(items, today) {
+  const adv = document.getElementById('advisory');
+  const soilItem = items.find(i => i.soilTemp !== undefined);
+  const preEmergentDone = window.LAWN_LOG && window.LAWN_LOG.some(l => l.completes === 'pre-emergent');
+
+  if ((today.month === 3 || today.month === 4) && soilItem && soilItem.soilTemp >= 53 && !preEmergentDone) {
+    adv.hidden = false;
+    adv.innerHTML = '';
+    adv.appendChild(el('strong', { text: 'Pre-emergent alert. ' }));
+    adv.appendChild(document.createTextNode(
+      `Soil at 2″ is averaging ${soilItem.soilTemp.toFixed(0)}°F — crabgrass germinates at sustained 55°F. ` +
+      `You haven't logged a pre-emergent yet this year. Put down Dimension (dithiopyr) ASAP. Wait at least 2 weeks after the Apr 2 Scotts application to safely stack herbicides.`
+    ));
+    return;
+  }
+  adv.hidden = true;
 }
 
 function renderThisMonth(today) {
   const item = window.LAWN_SCHEDULE.find(x => x.month === today.month);
-  const el = document.getElementById('thisMonth');
-  el.innerHTML = `<h3>${item.headline}</h3><p>${item.detail}</p>`;
+  document.getElementById('thisMonthKicker').textContent = `📅 ${item.name.toUpperCase()}`;
+  document.getElementById('thisMonthHeadline').textContent = item.headline;
+  document.getElementById('thisMonthDetail').textContent = item.detail;
 }
 
-function renderSchedule() {
-  const grid = document.getElementById('scheduleGrid');
-  const now = todayInRockville();
+function renderYearGrid(today) {
+  const grid = document.getElementById('yearGrid');
+  grid.innerHTML = '';
   for (const item of window.LAWN_SCHEDULE) {
-    const div = document.createElement('div');
-    div.className = 'month';
-    if (item.month === now.month) div.classList.add('current');
-    div.innerHTML = `
-      <div class="month-name">${item.name}</div>
-      <div class="month-headline">${item.headline}</div>
-      <div class="month-detail">${item.detail}</div>
-    `;
-    grid.appendChild(div);
+    const box = el('div', { class: 'month-box' });
+    if (item.month === today.month) box.classList.add('current');
+    else if (item.month < today.month) box.classList.add('past');
+    box.appendChild(el('div', { class: 'mb-name', text: item.name }));
+    box.appendChild(el('div', { class: 'mb-headline', text: item.headline }));
+    box.appendChild(el('div', { class: 'mb-detail', text: item.detail }));
+    grid.appendChild(box);
   }
 }
 
 function renderNextUp(today) {
-  const items = [];
-  const order = [];
-  for (let i = 0; i < 12; i++) {
-    const monthIdx = ((today.month - 1 + i) % 12) + 1;
-    order.push(window.LAWN_SCHEDULE.find(x => x.month === monthIdx));
-  }
+  const milestones = window.LAWN_MILESTONES || [];
+  const log = window.LAWN_LOG || [];
+  const completedIds = new Set(log.map(l => l.completes).filter(Boolean));
+  const nowDate = new Date(today.year, today.month - 1, today.day);
 
-  // Hard-coded upcoming milestones by calendar date
-  const upcoming = [];
-  const yr = today.year;
-  const addIfFuture = (monthDay, label, note) => {
-    const [m, d] = monthDay.split('-').map(Number);
-    const target = m * 100 + d;
-    const now = today.month * 100 + today.day;
-    let year = yr;
-    if (target < now) year = yr + 1;
-    upcoming.push({ date: new Date(year, m - 1, d), label, note });
-  };
-
-  addIfFuture('03-25', 'Apply Dimension pre-emergent', 'Watch soil temps — trigger at 53–55°F sustained for 5 days');
-  addIfFuture('05-25', 'Deadline for optional spring fertilizer', 'Only if lawn looks thin; skip if already fed last fall');
-  addIfFuture('08-20', 'Core-aerate compacted areas', 'Prep for September overseed');
-  addIfFuture('09-01', 'Overseed with Black Beauty + Veri-Green starter', 'Primary window Sept 1 – Oct 1');
-  addIfFuture('10-15', 'Second fall fertilizer (maintenance)', '~6–8 weeks after the first application');
-  addIfFuture('11-15', 'LAST LEGAL fertilizer day', 'MD blackout begins Nov 16');
-
-  upcoming.sort((a, b) => a.date - b.date);
-  const next3 = upcoming.slice(0, 3);
+  const enriched = milestones
+    .filter(m => !completedIds.has(m.id))
+    .map(m => {
+      const [mon, d] = m.date.split('-').map(Number);
+      let yr = today.year;
+      let target = new Date(yr, mon - 1, d);
+      const daysFromNow = Math.round((target - nowDate) / 86400000);
+      // If milestone is more than 14 days past, roll to next year.
+      if (daysFromNow < -14) {
+        yr = today.year + 1;
+        target = new Date(yr, mon - 1, d);
+      }
+      return { ...m, dateObj: target };
+    })
+    .sort((a, b) => a.dateObj - b.dateObj)
+    .slice(0, 3);
 
   const ul = document.getElementById('nextUp');
   ul.innerHTML = '';
-  for (const u of next3) {
-    const li = document.createElement('li');
-    const dateStr = u.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: u.date.getFullYear() !== today.year ? 'numeric' : undefined });
-    const days = Math.ceil((u.date - new Date(today.year, today.month - 1, today.day)) / 86400000);
-    const dayLabel = days === 0 ? 'today' : days === 1 ? 'tomorrow' : `in ${days} days`;
-    li.innerHTML = `<div class="next-date">${dateStr} <span class="days">· ${dayLabel}</span></div><div class="next-label">${u.label}</div><div class="next-note">${u.note}</div>`;
+  if (enriched.length === 0) {
+    ul.appendChild(el('div', { class: 'next-note', text: 'All caught up. Nothing on the horizon.' }));
+    return;
+  }
+  for (const it of enriched) {
+    const days = Math.round((it.dateObj - nowDate) / 86400000);
+    const when = days === 0 ? 'today' : days === 1 ? 'tomorrow' : days < 0 ? `${Math.abs(days)} days ago · overdue` : days < 31 ? `in ${days} days` : `in ${Math.round(days/7)} weeks`;
+    const monthAbbr = it.dateObj.toLocaleDateString('en-US', { month: 'short' }).toUpperCase();
+    const dayNum = it.dateObj.getDate();
+
+    const item = el('div', { class: 'next-item' });
+    if (days < 0) item.classList.add('overdue');
+
+    const dateCol = el('div', { class: 'next-date' });
+    dateCol.appendChild(el('div', { class: 'next-month', text: monthAbbr }));
+    dateCol.appendChild(el('div', { class: 'next-day', text: String(dayNum) }));
+    item.appendChild(dateCol);
+
+    const body = el('div');
+    body.appendChild(el('div', { class: 'next-when', text: when }));
+    body.appendChild(el('div', { class: 'next-label', text: it.label }));
+    body.appendChild(el('div', { class: 'next-note', text: it.note }));
+    item.appendChild(body);
+
+    ul.appendChild(item);
+  }
+}
+
+function renderLog() {
+  const box = document.getElementById('log');
+  box.innerHTML = '';
+  const sorted = [...(window.LAWN_LOG || [])].sort((a, b) => b.date.localeCompare(a.date));
+  if (sorted.length === 0) {
+    box.appendChild(el('div', { class: 'log-detail', text: 'Nothing logged yet this year.' }));
+    return;
+  }
+  for (const l of sorted) {
+    const d = new Date(l.date + 'T00:00:00');
+    const dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }).toUpperCase();
+    const item = el('div', { class: 'log-item' });
+    item.appendChild(el('div', { class: 'log-date', text: dateStr }));
+    const mid = el('div');
+    mid.appendChild(el('div', { class: 'log-label', text: l.label }));
+    mid.appendChild(el('div', { class: 'log-detail', text: l.detail }));
+    item.appendChild(mid);
+    item.appendChild(el('div', { class: 'log-check', text: '✓' }));
+    box.appendChild(item);
+  }
+}
+
+function renderProducts() {
+  const log = window.LAWN_LOG || [];
+  const hasScotts = log.some(l => /scotts/i.test(l.label));
+  const hasPreEmergent = log.some(l => l.completes === 'pre-emergent');
+
+  const products = [
+    {
+      title: 'Scotts Turf Builder Weed & Feed',
+      note: 'Nitrogen + broadleaf weed control (2,4-D). Kills dandelion and clover. At Walmart in the 2-pack for ~$40.',
+      done: hasScotts
+    },
+    {
+      title: 'Dimension (dithiopyr) pre-emergent',
+      note: 'The only common crabgrass pre-emergent with a short-enough residual (~12 weeks) to allow fall overseeding. Apply by mid-April. At Lowe\'s or Home Depot (Hi-Yield Turf & Ornamental Weed and Grass Stopper).',
+      done: hasPreEmergent
+    },
+    {
+      title: 'Jonathan Green Veri-Green Starter 12-18-8',
+      note: 'Buy in August. Apply at overseeding in September. The 18% phosphate is legal under Maryland\'s new-lawn exemption. Not "Love Your Lawn – Love Your Soil" — that\'s a soil conditioner, not a starter.'
+    },
+    {
+      title: 'Jonathan Green Black Beauty Original',
+      note: '100% tall fescue blend formulated for the Mid-Atlantic. Overseed September 1 – October 1 for best germination.'
+    }
+  ];
+
+  const grid = document.getElementById('productGrid');
+  grid.innerHTML = '';
+  for (const p of products) {
+    const card = el('div', { class: 'product' });
+    if (p.done) card.classList.add('done');
+    card.appendChild(el('h3', { text: p.title }));
+    card.appendChild(el('p', { text: p.note }));
+    grid.appendChild(card);
+  }
+}
+
+function renderRules() {
+  const rules = [
+    { title: 'Blackout', body: 'No lawn fertilizer applications Nov 16 – Mar 1. Last legal day is November 15.' },
+    { title: 'Per-application cap', body: '≤ 0.9 lb total nitrogen per 1,000 sq ft, of which no more than 0.7 lb may be water-soluble.' },
+    { title: 'Annual cap', body: 'Enhanced-efficiency products are capped at 2.5 lb N per 1,000 sq ft per year, with no more than 0.7 lb released in any given month.' },
+    { title: 'Slow-release minimum', body: 'All turf fertilizer sold in Maryland must contain at least 20% slow-release nitrogen.' },
+    { title: 'Phosphorus', body: 'Banned on established lawns unless a soil test shows deficiency. Permitted at establishment, patching, or renovation (starter fertilizer).' },
+    { title: 'Setbacks', body: '15 ft from any waterway (10 ft with a drop spreader or rotary spreader with a deflector shield). Sweep fertilizer off sidewalks and driveways. No application if heavy rain is forecast or the ground is frozen or saturated.' }
+  ];
+  const ul = document.getElementById('rulesList');
+  ul.innerHTML = '';
+  for (const r of rules) {
+    const li = el('li');
+    li.appendChild(el('strong', { text: r.title + '. ' }));
+    li.appendChild(document.createTextNode(r.body));
     ul.appendChild(li);
   }
 }
 
+/* ───────── Rate My Lawn ───────── */
+
+let currentMode = 'kevin';
+let currentImageB64 = null;
+let currentMediaType = null;
+
+function initRateLawn() {
+  for (const btn of document.querySelectorAll('.mode-btn')) {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentMode = btn.dataset.mode;
+      if (currentImageB64) submitRate();
+    });
+  }
+
+  const dz = document.getElementById('dropzone');
+  bindFileInput();
+
+  dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('dragging'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('dragging'));
+  dz.addEventListener('drop', async e => {
+    e.preventDefault();
+    dz.classList.remove('dragging');
+    const file = e.dataTransfer.files[0];
+    if (file && file.type.startsWith('image/')) {
+      await loadImage(file);
+      submitRate();
+    }
+  });
+
+  document.getElementById('keyCancel').addEventListener('click', () => document.getElementById('keyModal').hidden = true);
+  document.getElementById('keySave').addEventListener('click', () => {
+    const key = document.getElementById('apiKeyInput').value.trim();
+    if (key) {
+      localStorage.setItem('anthropic_api_key', key);
+      document.getElementById('keyModal').hidden = true;
+      if (currentImageB64) submitRate();
+    }
+  });
+}
+
+function bindFileInput() {
+  const input = document.getElementById('lawnPhoto');
+  if (!input) return;
+  input.addEventListener('change', async e => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    await loadImage(file);
+    submitRate();
+  });
+}
+
+async function loadImage(file) {
+  const base64 = await new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result.split(',')[1]);
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
+  currentImageB64 = base64;
+  currentMediaType = file.type;
+
+  const dz = document.getElementById('dropzone');
+  dz.classList.add('has-image');
+  dz.innerHTML = '';
+  const input = el('input', { type: 'file', accept: 'image/*', id: 'lawnPhoto' });
+  dz.appendChild(input);
+  const img = el('img');
+  img.src = `data:${file.type};base64,${base64}`;
+  dz.appendChild(img);
+  bindFileInput();
+}
+
+async function submitRate() {
+  const key = localStorage.getItem('anthropic_api_key');
+  if (!key) {
+    document.getElementById('keyModal').hidden = false;
+    document.getElementById('apiKeyInput').focus();
+    return;
+  }
+  const result = document.getElementById('rateResult');
+  result.hidden = false;
+  result.innerHTML = '';
+  result.appendChild(el('div', { class: 'rate-loading', text: 'Getting the verdict from Claude…' }));
+
+  try {
+    const data = await callClaude(currentImageB64, currentMediaType, currentMode, key);
+    renderRateResult(data, currentMode);
+  } catch (err) {
+    result.innerHTML = '';
+    const msg = el('div', { class: 'rate-err' });
+    msg.appendChild(el('strong', { text: 'Couldn\'t get a review. ' }));
+    msg.appendChild(document.createTextNode(err.message + ' Check your API key and try again.'));
+    result.appendChild(msg);
+  }
+}
+
+async function callClaude(imageB64, mediaType, mode, key) {
+  const systemKevin = `You are an expert turfgrass consultant for cool-season lawns in the Mid-Atlantic US. You are reviewing a photo of Kevin Carter's lawn — he grows Jonathan Green Black Beauty tall fescue in Rockville, Maryland. Give honest, specific, useful feedback. Do not be nice for the sake of being nice — Kevin wants a real review so he can build the best lawn in the neighborhood.`;
+
+  const systemFriend = `You are an expert turfgrass consultant reviewing a photo of a lawn owned by a friend of Kevin Carter. Kevin grows Jonathan Green Black Beauty tall fescue in Rockville, Maryland and is extremely competitive about his lawn. Your job: (1) give a real, honest review of the friend's lawn — score, strengths, issues, concrete recommendations — and (2) take every opportunity to point out how Kevin's lawn is better, whether you know anything about Kevin's lawn or not. Feel free to invent specific advantages for Kevin. Keep it playful and roasting, never cruel. Think: Kevin's smug neighbor who always one-ups at BBQs. Real lawn advice AND friendly trash talk. End with a one-liner parting shot ribbing the friend.`;
+
+  const ratingPrompt = `Review this lawn. Examine turf density, color, uniformity, weed pressure, bare patches, mowing quality, edging, thatch, disease signs, and anything else visible.
+
+Respond ONLY with JSON matching this schema (no markdown fences, no preamble):
+{
+  "score": number from 0 to 100,
+  "grade": one of "A+","A","A-","B+","B","B-","C+","C","C-","D+","D","D-","F",
+  "headline": "one short punchy verdict sentence",
+  "strengths": [3-5 specific things done well],
+  "issues": [3-5 specific problems visible in the photo],
+  "recommendations": [3-5 concrete prioritized actions]${mode === 'friend' ? `,
+  "kevin_wins": [3-5 specific playful ways Kevin's lawn is better, invent if needed],
+  "parting_shot": "one-sentence friendly jab at the friend"` : ''}
+}`;
+
+  const body = {
+    model: CLAUDE_MODEL,
+    max_tokens: 1800,
+    system: mode === 'friend' ? systemFriend : systemKevin,
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'image', source: { type: 'base64', media_type: mediaType, data: imageB64 } },
+        { type: 'text', text: ratingPrompt }
+      ]
+    }]
+  };
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': key,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify(body)
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    let friendly = `API ${res.status}`;
+    try {
+      const j = JSON.parse(errText);
+      if (j.error && j.error.message) friendly = j.error.message;
+    } catch {}
+    throw new Error(friendly);
+  }
+
+  const out = await res.json();
+  const textBlock = out.content.find(c => c.type === 'text');
+  if (!textBlock) throw new Error('No text in response.');
+  const match = textBlock.text.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error('Claude did not return JSON.');
+  return JSON.parse(match[0]);
+}
+
+function renderRateResult(data, mode) {
+  const result = document.getElementById('rateResult');
+  result.innerHTML = '';
+
+  // Score row
+  const scoreRow = el('div', { class: 'rate-score' });
+  const scoreCol = el('div');
+  const scoreNum = el('div', { class: 'score-num' });
+  scoreNum.appendChild(document.createTextNode(String(data.score)));
+  scoreNum.appendChild(el('span', { class: 'of', text: ' / 100' }));
+  scoreCol.appendChild(scoreNum);
+  scoreRow.appendChild(scoreCol);
+
+  const metaCol = el('div', { class: 'score-meta' });
+  metaCol.appendChild(el('div', { class: 'score-grade', text: data.grade || '' }));
+  metaCol.appendChild(el('div', { class: 'score-headline', text: data.headline || '' }));
+  scoreRow.appendChild(metaCol);
+  result.appendChild(scoreRow);
+
+  const addList = (title, listClass, items) => {
+    if (!items || !items.length) return;
+    const sec = el('div', { class: 'result-section' });
+    sec.appendChild(el('h4', { text: title }));
+    const ul = el('ul', { class: 'result-list ' + listClass });
+    for (const it of items) ul.appendChild(el('li', { text: String(it) }));
+    sec.appendChild(ul);
+    result.appendChild(sec);
+  };
+
+  addList('✅ What\'s working', '', data.strengths);
+  addList('⚠️ What\'s not', 'issues', data.issues);
+  addList('→ Do these next', 'recs', data.recommendations);
+  if (mode === 'friend' && data.kevin_wins) {
+    addList('🏆 Where Kevin\'s lawn wins', 'wins', data.kevin_wins);
+  }
+  if (mode === 'friend' && data.parting_shot) {
+    result.appendChild(el('div', { class: 'parting-shot', text: data.parting_shot }));
+  }
+}
+
+/* ───────── Main ───────── */
+
 async function main() {
   const today = todayInRockville();
+  renderDate(today);
   renderThisMonth(today);
-  renderSchedule();
-  renderNextUp(today);
+  renderYearGrid(today);
+  renderLog();
+  renderProducts();
+  renderRules();
+  initRateLawn();
 
   try {
     const weather = await fetchWeather();
-    const decision = computeWateringDecision(weather, today);
-    renderWaterCard(decision, weather, today);
+    const decision = computeDecision(weather, today);
+    renderHero(decision);
+    const items = renderStats(weather, decision, today);
+    renderAdvisory(items, today);
+    renderNextUp(today);
   } catch (err) {
-    const card = document.getElementById('waterCard');
-    card.classList.remove('loading');
-    card.dataset.color = 'slate';
-    document.getElementById('waterStatus').textContent = 'WEATHER UNAVAILABLE';
-    document.getElementById('waterExplain').textContent = `Couldn't reach Open-Meteo. ${err.message}`;
+    document.getElementById('heroHeadline').textContent = 'Weather unavailable.';
+    document.getElementById('heroSub').textContent = err.message;
+    renderNextUp(today);
   }
 }
 
