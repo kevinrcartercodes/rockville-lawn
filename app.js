@@ -6,7 +6,7 @@ const TARGET_INCHES_WEEK = 1.0;
 const WAIT_IF_RAIN_NEXT_48H = 0.25;
 const SUMMER_DORMANT_START = { month: 6, day: 15 };
 const SUMMER_DORMANT_END   = { month: 9, day: 1 };
-const CLAUDE_MODEL = 'claude-sonnet-4-5';
+const CLAUDE_MODEL = 'claude-haiku-4-5';
 
 /* ───────── Weather ───────── */
 
@@ -319,7 +319,62 @@ let currentMode = 'kevin';
 let currentImageB64 = null;
 let currentMediaType = null;
 
+function updateKeyStatus() {
+  const key = localStorage.getItem('anthropic_api_key');
+  const dot = document.getElementById('keyDot');
+  const txt = document.getElementById('keyStatusText');
+  const clear = document.getElementById('keyClearBtn');
+  const set = document.getElementById('keySetBtn');
+  if (key) {
+    dot.classList.add('ok');
+    const preview = key.slice(0, 10) + '…' + key.slice(-4);
+    txt.textContent = `Key saved · ${preview}`;
+    clear.hidden = false;
+    set.textContent = 'Change';
+  } else {
+    dot.classList.remove('ok');
+    txt.textContent = 'No API key set';
+    clear.hidden = true;
+    set.textContent = 'Set API key';
+  }
+}
+
+function openKeyModal() {
+  const modal = document.getElementById('keyModal');
+  const input = document.getElementById('apiKeyInput');
+  modal.hidden = false;
+  input.value = '';
+  setTimeout(() => input.focus(), 50);
+}
+
+function closeKeyModal() {
+  document.getElementById('keyModal').hidden = true;
+}
+
+function saveKey() {
+  const input = document.getElementById('apiKeyInput');
+  const key = input.value.trim();
+  if (!key) {
+    input.focus();
+    return;
+  }
+  if (!/^sk-ant-/.test(key)) {
+    alert('That doesn\'t look like an Anthropic API key. It should start with "sk-ant-".');
+    input.focus();
+    return;
+  }
+  localStorage.setItem('anthropic_api_key', key);
+  updateKeyStatus();
+  closeKeyModal();
+  console.log('[lawn] API key saved to localStorage (length: ' + key.length + ')');
+  if (currentImageB64) {
+    submitRate();
+  }
+}
+
 function initRateLawn() {
+  updateKeyStatus();
+
   for (const btn of document.querySelectorAll('.mode-btn')) {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
@@ -344,14 +399,21 @@ function initRateLawn() {
     }
   });
 
-  document.getElementById('keyCancel').addEventListener('click', () => document.getElementById('keyModal').hidden = true);
-  document.getElementById('keySave').addEventListener('click', () => {
-    const key = document.getElementById('apiKeyInput').value.trim();
-    if (key) {
-      localStorage.setItem('anthropic_api_key', key);
-      document.getElementById('keyModal').hidden = true;
-      if (currentImageB64) submitRate();
+  document.getElementById('keySetBtn').addEventListener('click', openKeyModal);
+  document.getElementById('keyClearBtn').addEventListener('click', () => {
+    if (confirm('Clear the stored API key?')) {
+      localStorage.removeItem('anthropic_api_key');
+      updateKeyStatus();
     }
+  });
+  document.getElementById('keyCancel').addEventListener('click', closeKeyModal);
+  document.getElementById('keySave').addEventListener('click', saveKey);
+  document.getElementById('apiKeyInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); saveKey(); }
+    if (e.key === 'Escape') closeKeyModal();
+  });
+  document.getElementById('keyModal').addEventListener('click', e => {
+    if (e.target.id === 'keyModal') closeKeyModal();
   });
 }
 
@@ -388,10 +450,14 @@ async function loadImage(file) {
 }
 
 async function submitRate() {
+  if (!currentImageB64) {
+    console.warn('[lawn] submitRate called with no image loaded');
+    return;
+  }
   const key = localStorage.getItem('anthropic_api_key');
   if (!key) {
-    document.getElementById('keyModal').hidden = false;
-    document.getElementById('apiKeyInput').focus();
+    console.log('[lawn] no API key, opening modal');
+    openKeyModal();
     return;
   }
   const result = document.getElementById('rateResult');
@@ -399,14 +465,22 @@ async function submitRate() {
   result.innerHTML = '';
   result.appendChild(el('div', { class: 'rate-loading', text: 'Getting the verdict from Claude…' }));
 
+  console.log(`[lawn] calling Claude (model=${CLAUDE_MODEL}, mode=${currentMode}, image=${Math.round(currentImageB64.length / 1024)}KB)`);
+
   try {
     const data = await callClaude(currentImageB64, currentMediaType, currentMode, key);
+    console.log('[lawn] got verdict', data);
     renderRateResult(data, currentMode);
   } catch (err) {
+    console.error('[lawn] Claude call failed', err);
     result.innerHTML = '';
     const msg = el('div', { class: 'rate-err' });
     msg.appendChild(el('strong', { text: 'Couldn\'t get a review. ' }));
-    msg.appendChild(document.createTextNode(err.message + ' Check your API key and try again.'));
+    msg.appendChild(document.createTextNode(err.message));
+    const hint = el('div', { class: 'log-detail' });
+    hint.style.marginTop = '10px';
+    hint.textContent = 'Open the browser console (on iOS Safari: Settings → Safari → Advanced → Web Inspector) to see the full error. Common causes: invalid or revoked API key, out of credits, or the key doesn\'t have Messages API access.';
+    msg.appendChild(hint);
     result.appendChild(msg);
   }
 }

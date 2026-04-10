@@ -330,6 +330,33 @@ section { margin-bottom: 56px; }
   letter-spacing: 0.3px;
 }
 
+.rate-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+.rate-toolbar .key-status { display: flex; align-items: center; gap: 6px; }
+.rate-toolbar .key-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--line-strong);
+}
+.rate-toolbar .key-dot.ok { background: var(--grass); }
+.rate-toolbar button {
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  color: var(--ink-2);
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 100px;
+  cursor: pointer;
+}
+.rate-toolbar button:hover { background: var(--cream-warm); }
 .rate-result { margin-top: 26px; }
 .rate-loading {
   text-align: center;
@@ -669,6 +696,7 @@ section { margin-bottom: 56px; }
 }
 
 /* ── Modal ─────────────────── */
+.modal[hidden] { display: none !important; }
 .modal {
   position: fixed;
   inset: 0;
